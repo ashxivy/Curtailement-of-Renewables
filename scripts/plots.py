@@ -4,68 +4,81 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-PLOTS_DIR = "plots/curtailment"
 
-def _ensure_plots_dir():
-    os.makedirs(PLOTS_DIR, exist_ok=True)
+# ─── Helpers ──────────────────────────────────────────────────────────────────
+def _get_plots_dir(country: str) -> str:
+    return os.path.join("plots", "curtailment", country)
 
-def _save_show(fig, filename):
-    _ensure_plots_dir()
-    path = os.path.join(PLOTS_DIR, filename)
+
+def _save_show(fig, filename: str, country: str = "allemagne") -> str:
+    plots_dir = _get_plots_dir(country)
+    os.makedirs(plots_dir, exist_ok=True)
+    path = os.path.join(plots_dir, filename)
     fig.tight_layout()
     fig.savefig(path, dpi=150, bbox_inches="tight")
     plt.show()
     return path
 
-def _base_style(ax, title=None, xlabel=None, ylabel=None):
-    if title: ax.set_title(title, fontsize=13, fontweight="bold")
-    if xlabel: ax.set_xlabel(xlabel)
-    if ylabel: ax.set_ylabel(ylabel)
-    ax.grid(alpha=0.25)
-    
 
-def plot_price_distribution(df, clip=(-200, 300), bins=120, filename="price_distribution.png"):
-    """Histogram of day-ahead prices (clipped)."""
+def _base_style(ax, title=None, xlabel=None, ylabel=None):
+    if title:   ax.set_title(title, fontsize=13, fontweight="bold")
+    if xlabel:  ax.set_xlabel(xlabel)
+    if ylabel:  ax.set_ylabel(ylabel)
+    ax.grid(alpha=0.25)
+
+
+# ─── Plots ────────────────────────────────────────────────────────────────────
+def plot_price_distribution(
+    df,
+    country: str = "allemagne",
+    clip=(-200, 300),
+    bins=120,
+    filename="price_distribution.png",
+):
+    """Histogramme des prix day-ahead (écrêté)."""
     fig, ax = plt.subplots(figsize=(10, 5))
     ax.hist(df["price"].clip(*clip), bins=bins)
     ax.axvline(0, linestyle="--", linewidth=1)
     _base_style(ax, "Price distribution", "Price [€/MWh]", "Hours")
-    return _save_show(fig, filename)
+    return _save_show(fig, filename, country)
 
 
-def plot_curtailment_v_price_scatter(df, sample_frac=0.2, filename="curtailment_vs_price.png"):
-    """Visualise la corrélation inverse entre prix et volume de curtailment."""
+def plot_curtailment_v_price_scatter(
+    df,
+    country: str = "allemagne",
+    sample_frac=0.2,
+    filename="curtailment_vs_price.png",
+):
+    """Corrélation inverse entre prix et volume de curtailment."""
     df_viz = df[df["curtailment_mwh"] > 0].copy()
     if sample_frac < 1:
         df_viz = df_viz.sample(frac=sample_frac)
 
     fig, ax = plt.subplots(figsize=(10, 6))
-    
     scatter = ax.scatter(
-        df_viz["price"], 
+        df_viz["price"],
         df_viz["curtailment_mwh"],
-        c=df_viz["vre_penetration_forecast"], 
+        c=df_viz["vre_penetration_forecast"],
         cmap="viridis",
         alpha=0.6,
-        s=30
+        s=30,
     )
-    
-    ax.axvline(0, color='red', linestyle='--', alpha=0.5)
+    ax.axvline(0, color="red", linestyle="--", alpha=0.5)
     _base_style(ax, "Curtailment Volume vs Price", "Price [€/MWh]", "Curtailment [MWh]")
-    
     cbar = plt.colorbar(scatter)
     cbar.set_label("RE Penetration Forecast")
-    
-    return _save_show(fig, filename)
+    return _save_show(fig, filename, country)
 
-def plot_export_saturation_curtailment(df, filename="export_saturation_logic.png"):
-    """Prouve que le curtailment survient quand les exports saturent."""
-    # On prend les moments de fort surplus (Balance > 0)
+
+def plot_export_saturation_curtailment(
+    df,
+    country: str = "allemagne",
+    filename="export_saturation_logic.png",
+):
+    """Montre que le curtailment survient quand les exports saturent."""
     df_viz = df[df["generation_load_balance"] > 0].copy()
-    
+
     fig, ax = plt.subplots(figsize=(12, 7))
-    
-    # On trace le volume d'export vs le volume de curtailment
     sns.scatterplot(
         data=df_viz,
         x="net_export_total",
@@ -73,45 +86,210 @@ def plot_export_saturation_curtailment(df, filename="export_saturation_logic.png
         hue="is_negative",
         palette={0: "gray", 1: "red"},
         alpha=0.5,
-        ax=ax
+        ax=ax,
     )
-    
     _base_style(ax, "Curtailment vs Net Exports", "Net Exports [MWh]", "Curtailment [MWh]")
-    return _save_show(fig, filename)
+    return _save_show(fig, filename, country)
 
-def plot_curtailment_heatmap(df, filename="curtailment_seasonal_heatmap.png"):
-    """Heatmap montrant quand le curtailment est le plus fréquent (Mois vs Heure)."""
+
+def plot_curtailment_heatmap(
+    df,
+    country: str = "allemagne",
+    filename="curtailment_seasonal_heatmap.png",
+):
+    """Heatmap Mois × Heure de la fréquence du curtailment."""
     pivot = df.pivot_table(
         index=df.index.month,
         columns=df.index.hour,
         values="curtailment_mwh",
-        aggfunc="sum"
+        aggfunc="sum",
     )
-    
     fig, ax = plt.subplots(figsize=(14, 6))
     sns.heatmap(pivot, cmap="YlOrRd", cbar_kws={"label": "Total Curtailment [MWh]"}, ax=ax)
     _base_style(ax, "Temporal Intensity of Curtailment", "Hour of Day", "Month")
-    return _save_show(fig, filename)
+    return _save_show(fig, filename, country)
 
-def plot_curtailment_event_zoom(df, start_date, end_date, filename="curtailment_event_zoom.png"):
-    """Zoom sur une période spécifique pour voir le 'Flat-topping'."""
-    d = df.loc[start_date:end_date]
-    
-    fig, ax1 = plt.subplots(figsize=(15, 7))
-    
-    # Production vs Forecast
-    ax1.fill_between(d.index, d["vre_forecast_total"], d["vre_real_total"], color='red', alpha=0.3, label="Curtailed Energy")
-    ax1.plot(d.index, d["vre_forecast_total"], label="VRE Potential (Forecast)", color="black", linestyle="--")
-    ax1.plot(d.index, d["vre_real_total"], label="VRE Actual Production", color="green", linewidth=2)
-    
-    ax1.set_ylabel("Power [MW/MWh]")
+
+def plot_weather_curtailment_conditions(
+    df: pd.DataFrame,
+    weather: pd.DataFrame,
+    country: str = "allemagne",
+    filename: str = "weather_curtailment_conditions.png",
+):
+    """
+    Compare les conditions météo (vitesse vent, rayonnement solaire) pendant
+    les heures avec/sans curtailment. Répond à : 'Under which conditions?'
+    """
+    merged = df.join(weather, how="inner")
+    curtailed = merged["is_curtailment_likely"] == 1
+
+    fig, axes = plt.subplots(1, 3, figsize=(16, 5))
+
+    # 1. Distribution vitesse vent 100 m
+    ax = axes[0]
+    ax.hist(merged.loc[~curtailed, "windspeed_100m"].dropna(), bins=40,
+            alpha=0.6, label="Normal", density=True, color="steelblue")
+    ax.hist(merged.loc[curtailed,  "windspeed_100m"].dropna(), bins=40,
+            alpha=0.6, label="Curtailment", density=True, color="tomato")
+    _base_style(ax, "Wind speed @ 100 m", "Wind speed [m/s]", "Density")
+    ax.legend()
+
+    # 2. Distribution rayonnement solaire
+    ax = axes[1]
+    ax.hist(merged.loc[~curtailed, "shortwave_radiation"].dropna(), bins=40,
+            alpha=0.6, label="Normal", density=True, color="steelblue")
+    ax.hist(merged.loc[curtailed,  "shortwave_radiation"].dropna(), bins=40,
+            alpha=0.6, label="Curtailment", density=True, color="tomato")
+    _base_style(ax, "Solar irradiation", "Shortwave radiation [W/m²]", "Density")
+    ax.legend()
+
+    # 3. Distribution température
+    ax = axes[2]
+    ax.hist(merged.loc[~curtailed, "temperature_2m"].dropna(), bins=40,
+            alpha=0.6, label="Normal", density=True, color="steelblue")
+    ax.hist(merged.loc[curtailed,  "temperature_2m"].dropna(), bins=40,
+            alpha=0.6, label="Curtailment", density=True, color="tomato")
+    _base_style(ax, "Temperature", "Temperature [°C]", "Density")
+    ax.legend()
+
+    fig.suptitle(f"Weather conditions during curtailment — {country.capitalize()}",
+                 fontsize=14, fontweight="bold")
+    return _save_show(fig, filename, country)
+
+
+def plot_curtailment_prob_by_wind(
+    df: pd.DataFrame,
+    weather: pd.DataFrame,
+    country: str = "allemagne",
+    filename: str = "curtailment_prob_vs_wind.png",
+):
+    """
+    Probabilité de curtailment en fonction de la vitesse du vent (binée).
+    Répond à : 'Under which conditions?' et 'For which renewables?'
+    """
+    merged = df.join(weather, how="inner").dropna(subset=["windspeed_100m", "is_curtailment_likely"])
+    merged["wind_bin"] = pd.cut(merged["windspeed_100m"], bins=range(0, 22, 2))
+    stats = (
+        merged.groupby("wind_bin", observed=True)["is_curtailment_likely"]
+        .agg(prob="mean", count="size")
+        .reset_index()
+    )
+
+    fig, ax1 = plt.subplots(figsize=(11, 5))
+    ax2 = ax1.twinx()
+
+    ax1.bar(range(len(stats)), stats["prob"] * 100, color="tomato", alpha=0.8,
+            label="P(curtailment) [%]")
+    ax2.plot(range(len(stats)), stats["count"], "o--", color="navy", alpha=0.7,
+             label="Nombre d'heures")
+
+    ax1.set_xticks(range(len(stats)))
+    ax1.set_xticklabels([str(b) for b in stats["wind_bin"]], rotation=45, ha="right")
+    _base_style(ax1, f"Curtailment probability vs wind speed — {country.capitalize()}",
+                "Wind speed bin [m/s]", "P(curtailment) [%]")
+    ax2.set_ylabel("Number of hours", color="navy")
     ax1.legend(loc="upper left")
-    
-    # Axe pour le prix
+    ax2.legend(loc="upper right")
+    return _save_show(fig, filename, country)
+
+
+def plot_curtailment_by_renewable_type(
+    df: pd.DataFrame,
+    country: str = "allemagne",
+    filename: str = "curtailment_by_renewable_type.png",
+):
+    """
+    Décompose le curtailment par type de renouvelable (éolien vs solaire)
+    et par mois. Répond à : 'For which renewables?'
+    Proxy : curtailment diurne (6h-20h) → solaire ; nocturne → éolien.
+    """
+    d = df[df["is_curtailment_likely"] == 1].copy()
+    d["month"] = d.index.month
+    d["is_daytime"] = ((d.index.hour >= 6) & (d.index.hour < 20)).astype(int)
+
+    monthly = d.groupby(["month", "is_daytime"])["curtailment_mwh"].sum().unstack(fill_value=0)
+    monthly.columns = ["Nuit (éolien)", "Jour (solaire + éolien)"]
+
+    fig, axes = plt.subplots(1, 2, figsize=(15, 5))
+
+    # Barres empilées par mois
+    ax = axes[0]
+    monthly.plot(kind="bar", stacked=True, ax=ax,
+                 color=["steelblue", "gold"], alpha=0.85)
+    _base_style(ax, f"Curtailment by month & time-of-day — {country.capitalize()}",
+                "Month", "Curtailment [MWh]")
+    ax.set_xticklabels(["Jan","Feb","Mar","Apr","May","Jun",
+                         "Jul","Aug","Sep","Oct","Nov","Dec"], rotation=45)
+    ax.legend()
+
+    # Pie chart global nuit/jour
+    ax = axes[1]
+    totals = monthly.sum()
+    ax.pie(totals, labels=totals.index, autopct="%1.1f%%",
+           colors=["steelblue", "gold"], startangle=90)
+    ax.set_title(f"Curtailment split: day vs night\n{country.capitalize()}",
+                 fontsize=12, fontweight="bold")
+
+    return _save_show(fig, filename, country)
+
+
+def plot_curtailment_wind_solar_scatter(
+    df: pd.DataFrame,
+    weather: pd.DataFrame,
+    country: str = "allemagne",
+    filename: str = "curtailment_wind_solar_map.png",
+):
+    """
+    Scatter 2D vitesse vent × rayonnement solaire, coloré par intensité du curtailment.
+    Montre la zone météo à risque.
+    """
+    merged = df.join(weather, how="inner")
+    sample = merged.sample(min(5000, len(merged)), random_state=42)
+
+    fig, ax = plt.subplots(figsize=(10, 7))
+    sc = ax.scatter(
+        sample["windspeed_100m"],
+        sample["shortwave_radiation"],
+        c=sample["curtailment_mwh"].clip(upper=sample["curtailment_mwh"].quantile(0.99)),
+        cmap="YlOrRd",
+        alpha=0.5,
+        s=15,
+    )
+    cbar = plt.colorbar(sc)
+    cbar.set_label("Curtailment [MWh]")
+    _base_style(ax,
+                f"Curtailment intensity: wind vs solar conditions — {country.capitalize()}",
+                "Wind speed @ 100 m [m/s]",
+                "Solar irradiation [W/m²]")
+    return _save_show(fig, filename, country)
+
+
+def plot_curtailment_event_zoom(
+    df,
+    start_date,
+    end_date,
+    country: str = "allemagne",
+    filename="curtailment_event_zoom.png",
+):
+    """Zoom sur un événement de curtailment (flat-topping)."""
+    d = df.loc[start_date:end_date]
+
+    fig, ax1 = plt.subplots(figsize=(15, 7))
+    ax1.fill_between(
+        d.index, d["vre_forecast_total"], d["vre_real_total"],
+        color="red", alpha=0.3, label="Curtailed Energy",
+    )
+    ax1.plot(d.index, d["vre_forecast_total"], label="VRE Potential (Forecast)",
+             color="black", linestyle="--")
+    ax1.plot(d.index, d["vre_real_total"], label="VRE Actual Production",
+             color="green", linewidth=2)
+    ax1.set_ylabel("Power [MWh]")
+    ax1.legend(loc="upper left")
+
     ax2 = ax1.twinx()
     ax2.plot(d.index, d["price"], color="blue", alpha=0.6, label="Price")
-    ax2.axhline(0, color='red', linewidth=1, linestyle='-')
+    ax2.axhline(0, color="red", linewidth=1, linestyle="-")
     ax2.set_ylabel("Price [€/MWh]", color="blue")
-    
+
     _base_style(ax1, f"Curtailment Event Detail ({start_date} to {end_date})")
-    return _save_show(fig, filename)
+    return _save_show(fig, filename, country)
