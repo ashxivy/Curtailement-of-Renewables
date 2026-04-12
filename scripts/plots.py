@@ -193,6 +193,41 @@ def plot_curtailment_prob_by_wind(
     return _save_show(fig, filename, country)
 
 
+def plot_curtailment_prob_by_temperature(
+    df: pd.DataFrame,
+    weather: pd.DataFrame,
+    country: str = "allemagne",
+    filename: str = "curtailment_prob_vs_temperature.png",
+):
+    """
+    Probabilité de curtailment en fonction de la température (binée par tranche de 5°C).
+    """
+    merged = df.join(weather, how="inner").dropna(subset=["temperature_2m", "is_curtailment_likely"])
+    merged["temp_bin"] = pd.cut(merged["temperature_2m"], bins=range(-15, 40, 5))
+    stats = (
+        merged.groupby("temp_bin", observed=True)["is_curtailment_likely"]
+        .agg(prob="mean", count="size")
+        .reset_index()
+    )
+
+    fig, ax1 = plt.subplots(figsize=(11, 5))
+    ax2 = ax1.twinx()
+
+    ax1.bar(range(len(stats)), stats["prob"] * 100, color="steelblue", alpha=0.8,
+            label="P(curtailment) [%]")
+    ax2.plot(range(len(stats)), stats["count"], "o--", color="tomato", alpha=0.7,
+             label="Nombre d'heures")
+
+    ax1.set_xticks(range(len(stats)))
+    ax1.set_xticklabels([str(b) for b in stats["temp_bin"]], rotation=45, ha="right")
+    _base_style(ax1, f"Curtailment probability vs temperature — {country.capitalize()}",
+                "Temperature bin [°C]", "P(curtailment) [%]")
+    ax2.set_ylabel("Number of hours", color="tomato")
+    ax1.legend(loc="upper left")
+    ax2.legend(loc="upper right")
+    return _save_show(fig, filename, country)
+
+
 def plot_curtailment_by_renewable_type(
     df: pd.DataFrame,
     country: str = "allemagne",
