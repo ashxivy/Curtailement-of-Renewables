@@ -337,6 +337,7 @@ def plot_residual_load_vs_price(
     clip_price=(-150, 200),
     sample_frac=0.15,
     random_state=42,
+    country: str = "allemagne",
     filename="residual_load_vs_price.png",
 ):
     """Price vs residual load, colored by wind (left) and solar (right)."""
@@ -381,7 +382,7 @@ def plot_residual_load_vs_price(
 
     fig.suptitle("Residual load vs price", fontsize=16, fontweight="bold")
 
-    return _save_show(fig, filename)
+    return  _save_show(fig, filename, country)
 
 
 def plot_export_congestion_analysis(
@@ -389,6 +390,7 @@ def plot_export_congestion_analysis(
     clip_price=(-150, 200),
     sample_frac=0.15,
     random_state=42,
+    country: str = "allemagne",
     filename="exports_and_price.png",
 ):
     """
@@ -440,4 +442,4 @@ def plot_export_congestion_analysis(
 
     plt.grid(True, alpha=0.3)
 
-    return _save_show(fig, filename)
+    return _save_show(fig, filename, country)
