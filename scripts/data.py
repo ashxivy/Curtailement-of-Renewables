@@ -111,12 +111,22 @@ COUNTRY_CONFIG = {
             "Hydro pumped storage consumption [MWh] Calculated resolutions": "pumped_consumption",
         },
         "price_map": {
-            "France [€/MWh] Calculated resolutions": "price"
+            "France [€/MWh] Calculated resolutions":             "price",
+            "Germany/Luxembourg [€/MWh] Calculated resolutions": "price_de_lu",
+            "Spain [€/MWh] Calculated resolutions":              "price_es",
+            "Italy North [€/MWh] Calculated resolutions":        "price_it",
+            "Belgium [€/MWh] Calculated resolutions":            "price_be",
+            "Switzerland [€/MWh] Calculated resolutions":        "price_ch",
+            "Netherlands [€/MWh] Calculated resolutions":        "price_nl",
+            "Austria [€/MWh] Calculated resolutions":            "price_at",
+            "Poland [€/MWh] Calculated resolutions":             "price_pl",
+            "Denmark 1 [€/MWh] Calculated resolutions":          "price_dk1",
+            "Portugal [€/MWh] Calculated resolutions":           "price_pt",
         },
         "price_de_map": {
-            "∅ DE/LU neighbours [€/MWh] Calculated resolutions": "price_de_lu",
-            "Germany/Luxembourg [€/MWh] Calculated resolutions": "price_de",
-            "Switzerland [€/MWh] Calculated resolutions":        "price_ch",
+            # Source : SMARD Allemagne — données complémentaires
+            "∅ DE/LU neighbours [€/MWh] Calculated resolutions": "price_de_avg",
+            "Germany/Luxembourg [€/MWh] Calculated resolutions": "price_de_smard",
         },
         "fcons_map": {
             "Forecasted load J [MWh] Calculated resolutions":   "load_forecast",
