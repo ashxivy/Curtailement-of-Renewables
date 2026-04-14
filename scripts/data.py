@@ -111,6 +111,12 @@ COUNTRY_CONFIG = {
         },
         "price_map": {
             "France [€/MWh] Calculated resolutions": "price",
+            "Germany/Luxembourg [€/MWh] Calculated resolutions": "price_de",
+            "Netherlands [€/MWh] Calculated resolutions":        "price_nl",
+            "Austria [€/MWh] Calculated resolutions":            "price_at",
+            "Poland [€/MWh] Calculated resolutions":             "price_pl",
+            "Denmark 1 [€/MWh] Calculated resolutions":          "price_dk1",
+            "Switzerland [€/MWh] Calculated resolutions":        "price_ch",
         },
         "fcons_map": {
             "Forecasted load J [MWh] Calculated resolutions":   "load_forecast",

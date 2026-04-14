@@ -433,7 +433,7 @@ def plot_export_congestion_analysis(
 
     plt.title("Exports, Congestion and Price Contagion", fontsize=16)
     plt.xlabel("Net Exports [MWh]  (>0 export | <0 import)")
-    plt.ylabel("German Price [€/MWh]")
+    plt.ylabel(f"{country} Price [€/MWh]")
 
     sm = plt.cm.ScalarMappable(cmap="coolwarm", norm=plt.Normalize(-50, 100))
     sm.set_array([])
