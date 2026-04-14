@@ -328,3 +328,116 @@ def plot_curtailment_event_zoom(
 
     _base_style(ax1, f"Curtailment Event Detail ({start_date} to {end_date})")
     return _save_show(fig, filename, country)
+
+
+
+
+def plot_residual_load_vs_price(
+    df,
+    clip_price=(-150, 200),
+    sample_frac=0.15,
+    random_state=42,
+    filename="residual_load_vs_price.png",
+):
+    """Price vs residual load, colored by wind (left) and solar (right)."""
+
+    tmp = df[(df["price"] > clip_price[0]) & (df["price"] < clip_price[1])].copy()
+
+    # échantillonnage
+    if sample_frac < 1:
+        tmp = tmp.sample(frac=sample_frac, random_state=random_state)
+
+    fig, axes = plt.subplots(1, 2, figsize=(16, 6), sharey=True)
+
+    sns.scatterplot(
+        data=tmp,
+        x="residual_load",
+        y="price",
+        hue="wind_total",
+        palette="viridis",
+        alpha=0.45,
+        s=20,
+        ax=axes[0],
+        legend=True,
+    )
+    axes[0].axhline(0, linestyle="--", linewidth=1, color="red")
+    axes[0].axvline(0, linestyle="--", linewidth=1, color="black")
+    _base_style(axes[0], "Wind effect", "Residual load [MWh]", "Price [€/MWh]")
+
+    sns.scatterplot(
+        data=tmp,
+        x="residual_load",
+        y="price",
+        hue="solar",
+        palette="plasma",
+        alpha=0.45,
+        s=18,
+        ax=axes[1],
+        legend=True,
+    )
+    axes[1].axhline(0, linestyle="--", linewidth=1, color="red")
+    axes[1].axvline(0, linestyle="--", linewidth=1, color="black")
+    _base_style(axes[1], "Solar effect", "Residual load [MWh]", None)
+
+    fig.suptitle("Residual load vs price", fontsize=16, fontweight="bold")
+
+    return _save_show(fig, filename)
+
+
+def plot_export_congestion_analysis(
+    df,
+    clip_price=(-150, 200),
+    sample_frac=0.15,
+    random_state=42,
+    filename="exports_and_price.png",
+):
+    """
+    Prix en fonction des exports nets
+    Couleur : prix moyen des pays voisins
+    """
+    df_viz = df.copy()
+
+    neighbor_cols = [c for c in df_viz.columns if "price_" in c and c != "price"]
+
+    if neighbor_cols:
+        df_viz["mean_neighbor_price"] = df_viz[neighbor_cols].mean(axis=1)
+    else:
+        df_viz["mean_neighbor_price"] = 0
+
+    df_viz = df_viz[(df_viz["price"] > clip_price[0]) & (df_viz["price"] < clip_price[1])]
+
+    # échantillonnage
+    if sample_frac < 1:
+        df_viz = df_viz.sample(frac=sample_frac, random_state=random_state)
+
+    fig = plt.figure(figsize=(12, 7))
+    ax = plt.gca()
+
+    sns.scatterplot(
+        data=df_viz,
+        x="net_export_total",
+        y="price",
+        hue="mean_neighbor_price",
+        palette="coolwarm",
+        hue_norm=(-50, 100),
+        alpha=0.7,
+        s=20,
+        ax=ax,
+        legend=False,
+    )
+
+    plt.axhline(0, color="black", linewidth=1)
+    plt.axvline(0, color="gray", linestyle="--")
+
+    plt.title("Exports, Congestion and Price Contagion", fontsize=16)
+    plt.xlabel("Net Exports [MWh]  (>0 export | <0 import)")
+    plt.ylabel("German Price [€/MWh]")
+
+    sm = plt.cm.ScalarMappable(cmap="coolwarm", norm=plt.Normalize(-50, 100))
+    sm.set_array([])
+    cbar = plt.colorbar(sm, ax=ax)
+    cbar.set_label("Average Neighbor Price [€/MWh]")
+
+    plt.grid(True, alpha=0.3)
+
+    return _save_show(fig, filename)
