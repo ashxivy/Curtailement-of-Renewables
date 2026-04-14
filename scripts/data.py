@@ -84,6 +84,7 @@ COUNTRY_CONFIG = {
             "gen":     "Actual_generation_hour.csv",
             "cons":    "Actual_consumption_Hour.csv",
             "price":   "Day-ahead_prices_hour.csv",
+            "price_de":"Day-ahead_prices_hour_de.csv",
             "fcons":   "Forecasted_consumption_hour.csv",
             "fgen":    "Forecasted_generation_Day-Ahead_Hour.csv",
             "crossb":  "Cross-border_physical_flows_hour.csv",
@@ -110,12 +111,11 @@ COUNTRY_CONFIG = {
             "Hydro pumped storage consumption [MWh] Calculated resolutions": "pumped_consumption",
         },
         "price_map": {
-            "France [€/MWh] Calculated resolutions": "price",
+            "France [€/MWh] Calculated resolutions": "price"
+        },
+        "price_de_map": {
+            "∅ DE/LU neighbours [€/MWh] Calculated resolutions": "price_de_lu",
             "Germany/Luxembourg [€/MWh] Calculated resolutions": "price_de",
-            "Netherlands [€/MWh] Calculated resolutions":        "price_nl",
-            "Austria [€/MWh] Calculated resolutions":            "price_at",
-            "Poland [€/MWh] Calculated resolutions":             "price_pl",
-            "Denmark 1 [€/MWh] Calculated resolutions":          "price_dk1",
             "Switzerland [€/MWh] Calculated resolutions":        "price_ch",
         },
         "fcons_map": {
@@ -205,6 +205,7 @@ def load_data(country: str) -> pd.DataFrame:
         cons_df    = read("cons"),
         gen_df     = read("gen"),
         price_df   = read("price"),
+        price_de_df = read("price_de"),
         fcons_df   = read("fcons"),
         fgen_df    = read("fgen"),
         crossb_df  = read("crossb"),
@@ -218,6 +219,7 @@ def preprocess_full(
     cons_df:    pd.DataFrame,
     gen_df:     pd.DataFrame,
     price_df:   pd.DataFrame,
+    price_de_df:   pd.DataFrame | None = None,
     fcons_df:   pd.DataFrame | None = None,
     fgen_df:    pd.DataFrame | None = None,
     crossb_df:  pd.DataFrame | None = None,
@@ -256,6 +258,7 @@ def preprocess_full(
         (fgen_df,   "fgen_map"),
         (crossb_df, "crossb_map"),
         (instgen_df,"instgen_map"),
+        (price_de_df, "price_de_map"),
     ]:
         if opt_df is not None:
             df = df.join(prepare(opt_df).rename(columns=cfg[map_key]), how="left")
