@@ -65,7 +65,7 @@ def build_rows(unix_seconds, series, freq_h=1):
 def save_csv(rows, filename):
     path = f"{OUTPUT_DIR}/{filename}"
     pd.DataFrame(rows).to_csv(path, index=False, sep=';')
-    print(f"  ✅ {filename}  ({len(rows):,} lignes)")
+    print(f"  OK {filename}  ({len(rows):,} lignes)")
 
 def ec_get(endpoint, params=""):
     url = f"{BASE_EC}/{endpoint}?country={COUNTRY}{params}"
@@ -111,8 +111,48 @@ def fetch_public_power():
 
 
 # ─── 3. Prix day-ahead ────────────────────────────────────────────────────────
+NEIGHBOR_BZN = {
+    "Germany/Luxembourg": "DE-LU",
+    "Spain":              "ES",
+    "Italy North":        "IT-North",
+    "Belgium":            "BE",
+    "Switzerland":        "CH",
+    "Netherlands":        "NL",
+    "Austria":            "AT",
+    "Poland":             "PL",
+    "Denmark 1":          "DK1",
+    "Portugal":           "PT",
+}
+
+def _fetch_price_bzn(bzn, start, end, retries=4):
+    """Retourne un DataFrame horaire {dt → price} pour un BZN donné (avec retry 429)."""
+    url = f"{BASE_EC}/price?bzn={bzn}&start={start}&end={end}"
+    for attempt in range(retries):
+        r = requests.get(url, timeout=30, headers=HEADERS)
+        if r.status_code == 429:
+            wait = 10 * (attempt + 1)
+            print(f"      [429] {bzn} {start} — attente {wait}s...")
+            time.sleep(wait)
+            continue
+        r.raise_for_status()
+        break
+    else:
+        r.raise_for_status()
+    d = r.json()
+    ts     = d.get("unix_seconds", [])
+    prices = d.get("price", [])
+    if not ts:
+        return pd.DataFrame(columns=["dt", "price"]).set_index("dt")
+    dts = ts_to_paris(ts)
+    return (
+        pd.DataFrame({"dt": dts, "price": prices})
+        .set_index("dt")
+        .resample("h")
+        .first()
+    )
+
 def fetch_dayahead_prices():
-    print("\n[3/8] Prix day-ahead France (energy-charts.info)...")
+    print("\n[3/8] Prix day-ahead France + voisins (energy-charts.info)...")
 
     rows = []
     today = date.today()
@@ -125,33 +165,35 @@ def fetch_dayahead_prices():
             start = f"{year}-{month:02d}-01"
             end   = f"{year}-{month:02d}-{last_day:02d}"
 
-            url = f"{BASE_EC}/price?bzn={BZN}&start={start}&end={end}"
-            r = requests.get(url, timeout=30, headers=HEADERS)
-            r.raise_for_status()
-            d = r.json()
+            # Prix France
+            df_fr = _fetch_price_bzn(BZN, start, end)
+            time.sleep(1.5)
 
-            ts     = d.get("unix_seconds", [])
-            prices = d.get("price", [])
+            # Prix voisins
+            neighbor_data = {}
+            for name, bzn in NEIGHBOR_BZN.items():
+                try:
+                    df_n = _fetch_price_bzn(bzn, start, end)
+                    neighbor_data[name] = df_n["price"]
+                except Exception as e:
+                    print(f"      [WARN] {name} ({bzn}) {year}-{month:02d}: {e}")
+                    neighbor_data[name] = pd.Series(dtype=float)
+                time.sleep(1.5)
 
-            # Resample à l'heure si résolution 15 min (certains mois 2025)
-            dts = ts_to_paris(ts)
-            df_tmp = (
-                pd.DataFrame({"dt": dts, "price": prices})
-                .set_index("dt")
-                .resample("h")
-                .first()
-                .reset_index()
-            )
-            for _, row in df_tmp.iterrows():
-                dt = row["dt"].to_pydatetime()
-                rows.append({
-                    "Start date": fmt_dt(dt),
-                    "End date":   fmt_dt(dt + timedelta(hours=1)),
+            for dt, row in df_fr.iterrows():
+                dt_py = dt.to_pydatetime() if hasattr(dt, "to_pydatetime") else dt
+                entry = {
+                    "Start date": fmt_dt(dt_py),
+                    "End date":   fmt_dt(dt_py + timedelta(hours=1)),
                     "France [€/MWh] Calculated resolutions": row["price"],
-                })
+                }
+                for name, series in neighbor_data.items():
+                    entry[f"{name} [€/MWh] Calculated resolutions"] = (
+                        series.get(dt) if dt in series.index else None
+                    )
+                rows.append(entry)
 
-            print(f"    {year}-{month:02d}: {len(df_tmp)} heures")
-            time.sleep(0.3)
+            print(f"    {year}-{month:02d}: {len(df_fr)} heures")
 
     save_csv(rows, "Day-ahead_prices_hour.csv")
 
