@@ -17,6 +17,7 @@ COUNTRY_CONFIG = {
             "crossb":  "Cross-border_physical_flows_hour.csv",
             "instgen": "Installed_generation_capacity_hour.csv",
             "tso":     "Costs_of_TSOs__without_costs_of_DSOs_hour.csv",
+            #"weather": "Weather_hourly_germany_2024_2025.csv",
         },
         "gen_map": {
             "Nuclear [MWh] Calculated resolutions":              "nuclear",
@@ -89,6 +90,7 @@ COUNTRY_CONFIG = {
             "fgen":    "Forecasted_generation_Day-Ahead_Hour.csv",
             "crossb":  "Cross-border_physical_flows_hour.csv",
             "instgen": "Installed_generation_capacity_hour.csv",
+            #"weather": "Weather_hourly_france_2024_2025.csv",
             # pas de TSO pour la France
         },
         "gen_map": {
@@ -182,6 +184,7 @@ def pick_col(df: pd.DataFrame, contains: str) -> str:
     return cols[0]
 
 
+
 # ─── Chargement complet ────────────────────────────────────────────────────────
 def load_data(country: str) -> pd.DataFrame:
     """
@@ -225,11 +228,12 @@ def load_data(country: str) -> pd.DataFrame:
 
 
 # ─── Prétraitement ────────────────────────────────────────────────────────────
+
 def preprocess_full(
     cons_df:    pd.DataFrame,
     gen_df:     pd.DataFrame,
     price_df:   pd.DataFrame,
-    price_de_df:   pd.DataFrame | None = None,
+    price_de_df: pd.DataFrame | None = None,
     fcons_df:   pd.DataFrame | None = None,
     fgen_df:    pd.DataFrame | None = None,
     crossb_df:  pd.DataFrame | None = None,
@@ -237,11 +241,11 @@ def preprocess_full(
     country:    str = "allemagne",
 ) -> pd.DataFrame:
     """
-    Fusionne les tables et renomme les colonnes en noms standardisés.
+    Fusionne les tables (y compris la météo) et renomme les colonnes en noms standardisés.
 
     Parameters
     ----------
-    country : "france" ou "allemagne" — détermine les mappings de colonnes
+    country : "france" ou "allemagne" — détermine les mappings de colonnes et le fichier météo
     """
     cfg = COUNTRY_CONFIG[country]
 
@@ -255,14 +259,46 @@ def preprocess_full(
             d = d.set_index("Start date")
         d = d.drop(columns=["End date"], errors="ignore")
         d = d.sort_index()
+        
+        # Gestion des doublons sur l'index temporel
         if d.index.duplicated().any():
             d = d.groupby(level=0).mean(numeric_only=True)
         return d
 
+    # --- Sous-fonction pour gérer la météo automatiquement ---
+    def load_and_prepare_weather(country_name: str) -> pd.DataFrame | None:
+        if country_name not in WEATHER_FILES:
+            print(f"Info : Pas de fichier météo configuré pour {country_name}")
+            return None
+            
+        path = Path(COUNTRY_CONFIG[country_name]["data_dir"]) / WEATHER_FILES[country_name]
+        
+        if not path.exists():
+            print(f"Avertissement : Fichier météo introuvable pour {country_name} ({path})")
+            return None
+
+        WEATHER_VARS = [
+            'windspeed_10m', 'windspeed_100m', 
+            'shortwave_radiation', 'direct_radiation', 
+            'temperature_2m', 'cloudcover'
+        ]
+
+        df_w = pd.read_csv(path, parse_dates=["time"])
+        cols = ["time"] + [c for c in WEATHER_VARS if c in df_w.columns]
+        
+        return (
+            df_w[cols]
+            .groupby("time")
+            .mean()
+            .rename_axis("Start date")
+        )
+
+    # 1. Tables de base avec mapping
     df = prepare(price_df).rename(columns=cfg["price_map"])
     df = df.join(prepare(cons_df).rename(columns=cfg["cons_map"]),    how="left")
     df = df.join(prepare(gen_df).rename(columns=cfg["gen_map"]),      how="left")
 
+    # 2. Tables optionnelles ENTSO-E avec mapping
     for opt_df, map_key in [
         (fcons_df,  "fcons_map"),
         (fgen_df,   "fgen_map"),
@@ -272,6 +308,12 @@ def preprocess_full(
     ]:
         if opt_df is not None:
             df = df.join(prepare(opt_df).rename(columns=cfg[map_key]), how="left")
+
+    # 3. Ajout automatique de la Météo
+    weather_df = load_and_prepare_weather(country)
+    if weather_df is not None:
+        # L'index est déjà "Start date" grâce à la sous-fonction
+        df = df.join(weather_df, how="left")
 
     return df
 
@@ -288,30 +330,33 @@ WEATHER_VARS = [
     "temperature_2m", "cloudcover",
 ]
 
-def load_weather(country: str) -> pd.DataFrame:
-    """
-    Charge la météo horaire et retourne la moyenne zonale par heure.
-    Index : timestamps naïfs en heure locale (même référence que load_data).
-    """
-    if country not in WEATHER_FILES:
-        raise ValueError(f"Météo non disponible pour : {country!r}")
-    path = COUNTRY_CONFIG[country]["data_dir"] / WEATHER_FILES[country]
-    if not path.exists():
-        raise FileNotFoundError(f"Fichier météo absent : {path}\nLance fetch_weather_germany() dans load_data.py")
-
-    df = pd.read_csv(path, parse_dates=["time"])
-    cols = ["time"] + [c for c in WEATHER_VARS if c in df.columns]
-    return (
-        df[cols]
-        .groupby("time")
-        .mean()
-        .rename_axis("Start date")
-    )
+#def load_weather(country: str) -> pd.DataFrame:
+#    """
+#    Charge la météo horaire et retourne la moyenne zonale par heure.
+#    Index : timestamps naïfs en heure locale (même référence que load_data).
+#    """
+#    if country not in WEATHER_FILES:
+#        raise ValueError(f"Météo non disponible pour : {country!r}")
+#    path = COUNTRY_CONFIG[country]["data_dir"] / WEATHER_FILES[country]
+#    if not path.exists():
+#        raise FileNotFoundError(f"Fichier météo absent : {path}\nLance fetch_weather_germany() dans load_data.py")
+#
+#    df = pd.read_csv(path, parse_dates=["time"])
+#    cols = ["time"] + [c for c in WEATHER_VARS if c in df.columns]
+#    return (
+#        df[cols]
+#        .groupby("time")
+#        .mean()
+#        .rename_axis("Start date")
+#    )
 
 
 # ─── Feature engineering ──────────────────────────────────────────────────────
+import pandas as pd
+import numpy as np
+
 def add_features(df: pd.DataFrame, drop_missing_critical: bool = True) -> pd.DataFrame:
-    """Crée l'ensemble des features dérivées, dont l'estimation du curtailment."""
+    """Crée l'ensemble des features dérivées, dont l'estimation du curtailment (via marché et via météo)."""
     out = df.copy()
 
     # --- Temps ---
@@ -351,8 +396,8 @@ def add_features(df: pd.DataFrame, drop_missing_critical: bool = True) -> pd.Dat
 
     # --- Demande & bilan ---
     if "load" in out.columns:
-        out["residual_load"]        = out["load"] - out["vre_real_total"]
-        out["total_generation"]     = out["renewable_total"] + out["thermal_total"]
+        out["residual_load"]           = out["load"] - out["vre_real_total"]
+        out["total_generation"]        = out["renewable_total"] + out["thermal_total"]
         out["generation_load_balance"] = out["total_generation"] - out["load"]
 
     # --- Prévisions ---
@@ -369,12 +414,12 @@ def add_features(df: pd.DataFrame, drop_missing_critical: bool = True) -> pd.Dat
         denom = out["load_forecast"].replace(0, np.nan)
         out["vre_penetration_forecast"] = out["vre_forecast_total"] / denom
 
-    # --- Curtailment ---
+    # --- Curtailment (Basé sur les prévisions du marché) ---
     out["curtailment_raw_gap"] = (
         out["vre_forecast_total"] - out["vre_real_total"]
     ).clip(lower=0)
 
-    # Capacity factors
+    # Capacity factors basés sur le réel
     cap_wind = out.get("cap_wind_on", 0) + out.get("cap_wind_off", 0)
     out["wind_capacity_factor"]  = out["wind_total"] / cap_wind.replace(0, np.nan)
     out["solar_capacity_factor"] = (
@@ -391,6 +436,57 @@ def add_features(df: pd.DataFrame, drop_missing_critical: bool = True) -> pd.Dat
         ).astype(int)
 
         out["curtailment_mwh"] = out["curtailment_raw_gap"] * out["is_curtailment_likely"]
+
+    # --- NOUVEAU : Curtailment (Basé sur la physique et la météo) ---
+    if "windspeed_100m" in out.columns and "shortwave_radiation" in out.columns:
+        
+        # 1. Calcul du Facteur de Charge (CF) Éolien théorique
+        v = out["windspeed_100m"].fillna(0)
+        v_cut_in = 3.0
+        v_rated = 12.0
+        v_cut_out = 25.0
+        
+        out["wind_cf_weather"] = np.select(
+            [
+                v < v_cut_in,
+                (v >= v_cut_in) & (v < v_rated),
+                (v >= v_rated) & (v < v_cut_out),
+                v >= v_cut_out
+            ],
+            [
+                0.0,
+                (v**3 - v_cut_in**3) / (v_rated**3 - v_cut_in**3), # Courbe cubique
+                1.0,
+                0.0
+            ],
+            default=0.0
+        )
+        
+        # 2. Calcul du Facteur de Charge (CF) Solaire théorique (STC = 1000 W/m2)
+        g = out["shortwave_radiation"].fillna(0)
+        out["solar_cf_weather"] = (g / 1000.0).clip(upper=1.0)
+        
+        # Préparation sécurisée des capacités installées pour le calcul vectoriel
+        cap_solar_s = out.get("cap_solar", pd.Series(0, index=out.index)).replace(np.nan, 0)
+        cap_wind_s = cap_wind if isinstance(cap_wind, pd.Series) else pd.Series(cap_wind, index=out.index).replace(np.nan, 0)
+        
+        # 3. Calcul de la Production Théorique Météo (MWh)
+        out["wind_theoretical_gen"] = out["wind_cf_weather"] * cap_wind_s
+        out["solar_theoretical_gen"] = out["solar_cf_weather"] * cap_solar_s
+        out["vre_theoretical_total"] = out["wind_theoretical_gen"] + out["solar_theoretical_gen"]
+        
+        # 4. Calcul de l'écrêtement physique (Théorie - Réalité)
+        out["curtailment_physical_wind"] = (out["wind_theoretical_gen"] - out["wind_total"]).clip(lower=0)
+        out["curtailment_physical_solar"] = (out["solar_theoretical_gen"] - out.get("solar", 0)).clip(lower=0)
+        out["curtailment_physical_total"] = out["curtailment_physical_wind"] + out["curtailment_physical_solar"]
+        
+        # 5. Application du filtre économique sur l'écrêtement physique
+        if "price" in out.columns:
+            out["curtailment_physical_economic"] = np.where(
+                out["price"] < price_threshold, 
+                out["curtailment_physical_total"], 
+                0
+            )
 
     # --- Nettoyage ---
     if drop_missing_critical:

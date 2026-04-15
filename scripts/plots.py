@@ -112,7 +112,6 @@ def plot_curtailment_heatmap(
 
 def plot_weather_curtailment_conditions(
     df: pd.DataFrame,
-    weather: pd.DataFrame,
     country: str = "allemagne",
     filename: str = "weather_curtailment_conditions.png",
 ):
@@ -120,7 +119,7 @@ def plot_weather_curtailment_conditions(
     Compare les conditions météo (vitesse vent, rayonnement solaire) pendant
     les heures avec/sans curtailment. Répond à : 'Under which conditions?'
     """
-    merged = df.join(weather, how="inner")
+    merged = df.copy()
     curtailed = merged["is_curtailment_likely"] == 1
 
     fig, axes = plt.subplots(1, 3, figsize=(16, 5))
@@ -159,7 +158,6 @@ def plot_weather_curtailment_conditions(
 
 def plot_curtailment_prob_by_wind(
     df: pd.DataFrame,
-    weather: pd.DataFrame,
     country: str = "allemagne",
     filename: str = "curtailment_prob_vs_wind.png",
 ):
@@ -167,7 +165,7 @@ def plot_curtailment_prob_by_wind(
     Probabilité de curtailment en fonction de la vitesse du vent (binée).
     Répond à : 'Under which conditions?' et 'For which renewables?'
     """
-    merged = df.join(weather, how="inner").dropna(subset=["windspeed_100m", "is_curtailment_likely"])
+    merged = df.dropna(subset=["windspeed_100m", "is_curtailment_likely"])
     merged["wind_bin"] = pd.cut(merged["windspeed_100m"], bins=range(0, 22, 2))
     stats = (
         merged.groupby("wind_bin", observed=True)["is_curtailment_likely"]
@@ -195,14 +193,13 @@ def plot_curtailment_prob_by_wind(
 
 def plot_curtailment_prob_by_temperature(
     df: pd.DataFrame,
-    weather: pd.DataFrame,
     country: str = "allemagne",
     filename: str = "curtailment_prob_vs_temperature.png",
 ):
     """
     Probabilité de curtailment en fonction de la température (binée par tranche de 5°C).
     """
-    merged = df.join(weather, how="inner").dropna(subset=["temperature_2m", "is_curtailment_likely"])
+    merged = df.dropna(subset=["temperature_2m", "is_curtailment_likely"])
     merged["temp_bin"] = pd.cut(merged["temperature_2m"], bins=range(-15, 40, 5))
     stats = (
         merged.groupby("temp_bin", observed=True)["is_curtailment_likely"]
@@ -270,7 +267,6 @@ def plot_curtailment_by_renewable_type(
 
 def plot_curtailment_wind_solar_scatter(
     df: pd.DataFrame,
-    weather: pd.DataFrame,
     country: str = "allemagne",
     filename: str = "curtailment_wind_solar_map.png",
 ):
@@ -278,7 +274,7 @@ def plot_curtailment_wind_solar_scatter(
     Scatter 2D vitesse vent × rayonnement solaire, coloré par intensité du curtailment.
     Montre la zone météo à risque.
     """
-    merged = df.join(weather, how="inner")
+    merged = df.copy()
     sample = merged.sample(min(5000, len(merged)), random_state=42)
 
     fig, ax = plt.subplots(figsize=(10, 7))
