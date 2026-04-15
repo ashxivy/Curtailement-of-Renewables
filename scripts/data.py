@@ -309,17 +309,17 @@ def preprocess_full(
 
 
 # ─── Météo ────────────────────────────────────────────────────────────────────
-#WEATHER_FILES = {
-#    "france":    "Weather_hourly_france_2024_2025.csv",
-#    "allemagne": "Weather_hourly_germany_2024_2025.csv",
-#}
-#
-#WEATHER_VARS = [
-#    "windspeed_10m", "windspeed_100m",
-#    "shortwave_radiation", "direct_radiation",
-#    "temperature_2m", "cloudcover",
-#]
-#
+WEATHER_FILES = {
+    "france":    "Weather_hourly_france_2024_2025.csv",
+    "allemagne": "Weather_hourly_germany_2024_2025.csv",
+}
+
+WEATHER_VARS = [
+    "windspeed_10m", "windspeed_100m",
+    "shortwave_radiation", "direct_radiation",
+    "temperature_2m", "cloudcover",
+]
+
 #def load_weather(country: str) -> pd.DataFrame:
 #    """
 #    Charge la météo horaire et retourne la moyenne zonale par heure.
