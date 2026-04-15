@@ -50,14 +50,14 @@ def plot_curtailment_v_price_scatter(
     filename="curtailment_vs_price.png",
 ):
     """Corrélation inverse entre prix et volume de curtailment."""
-    df_viz = df[df["curtailment_mwh"] > 0].copy()
+    df_viz = df[df["curtailment_physical_total"] > 0].copy()
     if sample_frac < 1:
         df_viz = df_viz.sample(frac=sample_frac)
 
     fig, ax = plt.subplots(figsize=(10, 6))
     scatter = ax.scatter(
         df_viz["price"],
-        df_viz["curtailment_mwh"],
+        df_viz["curtailment_physical_total"],
         c=df_viz["vre_penetration_forecast"],
         cmap="viridis",
         alpha=0.6,
@@ -93,20 +93,27 @@ def plot_export_saturation_curtailment(
 
 
 def plot_curtailment_heatmap(
-    df,
-    country: str = "allemagne",
-    filename="curtailment_seasonal_heatmap.png",
+    df: pd.DataFrame,
+    country: str = "france",
+    filename: str = "curtailment_seasonal_heatmap.png",
 ):
-    """Heatmap Mois × Heure de la fréquence du curtailment."""
+    """Heatmap Mois × Heure de la fréquence du curtailment physique."""
+    # On utilise la nouvelle variable d'écrêtement physique !
+    target_var = "curtailment_physical_total" if "curtailment_physical_total" in df.columns else "curtailment_mwh"
+    
     pivot = df.pivot_table(
         index=df.index.month,
         columns=df.index.hour,
-        values="curtailment_mwh",
+        values=target_var,
         aggfunc="sum",
     )
     fig, ax = plt.subplots(figsize=(14, 6))
-    sns.heatmap(pivot, cmap="YlOrRd", cbar_kws={"label": "Total Curtailment [MWh]"}, ax=ax)
-    _base_style(ax, "Temporal Intensity of Curtailment", "Hour of Day", "Month")
+    sns.heatmap(pivot, cmap="YlOrRd", cbar_kws={"label": f"Total Curtailment [MWh]"}, ax=ax)
+    
+    # On renomme proprement l'axe des Y pour les mois
+    ax.set_yticklabels(["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"], rotation=0)
+    
+    _base_style(ax, f"Temporal Intensity of Curtailment — {country.capitalize()}", "Hour of Day", "Month")
     return _save_show(fig, filename, country)
 
 
@@ -334,10 +341,9 @@ def plot_residual_load_vs_price(
     sample_frac=0.15,
     random_state=42,
     country: str = "allemagne",
-    filename="residual_load_vs_price.png",
 ):
     """Price vs residual load, colored by wind (left) and solar (right)."""
-
+    filename=f"residual_load_vs_price_{country}.png"
     tmp = df[(df["price"] > clip_price[0]) & (df["price"] < clip_price[1])].copy()
 
     # échantillonnage
@@ -376,10 +382,96 @@ def plot_residual_load_vs_price(
     axes[1].axvline(0, linestyle="--", linewidth=1, color="black")
     _base_style(axes[1], "Solar effect", "Residual load [MWh]", None)
 
-    fig.suptitle("Residual load vs price", fontsize=16, fontweight="bold")
+    fig.suptitle(f"Residual load vs price - {country.capitalize()}", fontsize=16, fontweight="bold")
 
     return  _save_show(fig, filename, country)
 
+
+def plot_curtailment_conditions_scatter(
+    df: pd.DataFrame,
+    country: str = "france",
+    sample_frac: float = 0.5,
+    filename: str = "curtailment_conditions_scatter.png",
+):
+    """Montre que le curtailment survient à faible charge résiduelle et prix bas/négatifs."""
+    target_var = "curtailment_physical_total" if "curtailment_physical_total" in df.columns else "curtailment_mwh"
+    
+    # On ne garde que les heures avec un écrêtement significatif
+    df_viz = df[df[target_var] > 10].copy()
+    if sample_frac < 1:
+        df_viz = df_viz.sample(frac=sample_frac, random_state=42)
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    scatter = ax.scatter(
+        df_viz["residual_load"],
+        df_viz["price"],
+        c=df_viz[target_var],
+        cmap="viridis",
+        alpha=0.6,
+        s=40,
+    )
+    
+    # Lignes de repère pour le zéro
+    ax.axhline(0, color="red", linestyle="--", alpha=0.8, linewidth=1.5, label="Zero Price")
+    ax.axvline(0, color="black", linestyle="--", alpha=0.5, linewidth=1)
+    
+    _base_style(ax, f"Conditions of Curtailment — {country.capitalize()}", "Residual Load [MWh]", "Day-Ahead Price [€/MWh]")
+    ax.legend(loc="upper left")
+    
+    cbar = plt.colorbar(scatter)
+    cbar.set_label("Curtailed Volume [MWh]")
+    return _save_show(fig, filename, country)
+
+def plot_combined_curtailment_analysis(
+    df: pd.DataFrame,
+    country: str = "france",
+    filename: str = "combined_curtailment_analysis.png",
+):
+    """
+    Analyse combinée : 
+    1. Barres empilées mensuelles par source (Vent/Soleil).
+    2. Heatmap temporelle (Mois x Heure) pour localiser l'écrêtement dans la journée.
+    """
+    # Vérification des colonnes
+    wind_col = "curtailment_physical_wind"
+    solar_col = "curtailment_physical_solar"
+    target_var = "curtailment_physical_total"
+    
+    if not all(c in df.columns for c in [wind_col, solar_col, target_var]):
+        print("Erreur : Colonnes physiques manquantes.")
+        return None
+
+    # Agrégation mensuelle par source
+    monthly_src = df.groupby(df.index.month)[[wind_col, solar_col]].sum()
+    monthly_src.columns = ["Wind Curtailment", "Solar Curtailment"]
+
+    # Pivot pour la heatmap (Somme par mois et par heure)
+    heatmap_data = df.pivot_table(
+        index=df.index.month,
+        columns=df.index.hour,
+        values=target_var,
+        aggfunc="sum"
+    )
+
+    fig, axes = plt.subplots(1, 2, figsize=(18, 7), gridspec_kw={'width_ratios': [1, 1.2]})
+
+    # --- 1. Barres empilées (Volume & Source) ---
+    ax1 = axes[0]
+    monthly_src.plot(kind="bar", stacked=True, ax=ax1, color=["#4b8bbe", "#ffcc00"], alpha=0.9)
+    _base_style(ax1, "Monthly Curtailment Volume by Source", "Month", "Volume [MWh]")
+    ax1.set_xticklabels(["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"], rotation=45)
+    ax1.legend()
+
+    # --- 2. Heatmap (Timing & Saisonnalité) ---
+    ax2 = axes[1]
+    sns.heatmap(heatmap_data, cmap="YlOrRd", ax=ax2, cbar_kws={'label': 'Total Curtailment [MWh]'})
+    ax2.set_yticklabels(["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"], rotation=0)
+    _base_style(ax2, "Curtailment Intensity (Hour vs Month)", "Hour of Day", "Month")
+
+    plt.tight_layout()
+    return _save_show(fig, filename, country)
+    
+   
 
 def plot_export_congestion_analysis(
     df,
@@ -387,12 +479,12 @@ def plot_export_congestion_analysis(
     sample_frac=0.15,
     random_state=42,
     country: str = "allemagne",
-    filename="exports_and_price.png",
 ):
     """
     Prix en fonction des exports nets
     Couleur : prix moyen des pays voisins
     """
+    filename=f"exports_and_price_{country}.png"
     df_viz = df.copy()
 
     neighbor_cols = [c for c in df_viz.columns if "price_" in c and c != "price"]
@@ -427,7 +519,7 @@ def plot_export_congestion_analysis(
     plt.axhline(0, color="black", linewidth=1)
     plt.axvline(0, color="gray", linestyle="--")
 
-    plt.title("Exports, Congestion and Price Contagion", fontsize=16)
+    plt.title(f"Exports, Congestion and Price Contagion - {country.capitalize()}", fontsize=16)
     plt.xlabel("Net Exports [MWh]  (>0 export | <0 import)")
     plt.ylabel(f"{country} Price [€/MWh]")
 
@@ -439,3 +531,82 @@ def plot_export_congestion_analysis(
     plt.grid(True, alpha=0.3)
 
     return _save_show(fig, filename, country)
+
+def plot_curtailment_comparison_with_price(
+    df: pd.DataFrame,
+    start_date: str,
+    end_date: str,
+    country: str = "france",
+    filename: str = "curtailment_method_comparison_price.png",
+):
+    """
+    Compare les deux méthodes de calcul de l'écrêtement sur une période donnée,
+    en superposant la courbe des prix pour vérifier la corrélation avec les prix négatifs.
+    """
+    # Sélection de la période
+    d = df.loc[start_date:end_date].copy()
+    
+    col_market = "curtailment_mwh" if "curtailment_mwh" in d.columns else "curtailment_raw_gap"
+    col_physical = "curtailment_physical_total"
+    
+    fig, ax1 = plt.subplots(figsize=(15, 7))
+    
+    # --- Axe Principal (Gauche) : Les volumes d'écrêtement ---
+    ax1.plot(d.index, d[col_physical], label="Physical Curtailment (Weather-based)", color="tomato", linewidth=2.5)
+    ax1.plot(d.index, d[col_market], label="Market Curtailment (Forecast-based)", color="steelblue", linewidth=2.5)
+    
+    # Zone de remplissage
+    fill = ax1.fill_between(d.index, d[col_market], d[col_physical], 
+                            color="tomato", alpha=0.15, label="Anticipated Curtailment (Endogenized)")
+    
+    ax1.set_ylabel("Curtailment Volume [MWh]", color="black", fontsize=11)
+    
+    # --- Axe Secondaire (Droite) : Le Prix Day-Ahead ---
+    if "price" in d.columns:
+        ax2 = ax1.twinx()
+        
+        # Courbe des prix
+        ax2.plot(d.index, d["price"], label="Day-Ahead Price", color="purple", linewidth=1.5, linestyle="--", alpha=0.8)
+        ax2.set_ylabel("Price [€/MWh]", color="purple", fontsize=11)
+        ax2.tick_params(axis='y', labelcolor="purple")
+        
+        # Ligne rouge pointillée horizontale à ZÉRO pour le prix
+        ax2.axhline(0, color="red", linestyle=":", linewidth=2, alpha=0.7, label="Zero Price Line")
+        
+        # Légende de l'axe de droite (Prix)
+        ax2.legend(loc="upper right", fontsize=10)
+    
+    # --- Formattage global ---
+    # On met None pour le ylabel dans _base_style car on vient de le définir manuellement pour ax1 et ax2
+    _base_style(ax1, 
+                f"Curtailment vs Price ({start_date} to {end_date}) — {country.capitalize()}", 
+                "Date", 
+                None)
+    
+    # Légende de l'axe de gauche (Volumes)
+    ax1.legend(loc="upper left", fontsize=10)
+    
+    return _save_show(fig, filename, country)
+
+
+def plot_mix_during_curtailment(df, country="france"):
+    """
+    Montre la part des autres sources (Nucléaire, Thermique) 
+    quand l'écrêtement est au maximum.
+    """
+    # On prend les 5% des heures où l'écrêtement physique est le plus fort
+    threshold = df["curtailment_physical_total"].quantile(0.95)
+    high_curt = df[df["curtailment_physical_total"] > threshold].copy()
+    
+    # On agrège les catégories de production
+    mix_cols = ["nuclear", "gas", "coal", "lignite", "hydro", "vre_real_total"]
+    available_cols = [c for c in mix_cols if c in high_curt.columns]
+    
+    mean_gen = high_curt[available_cols].mean()
+    
+    fig, ax = plt.subplots(figsize=(8, 6))
+    mean_gen.plot(kind='bar', ax=ax, color='teal')
+    
+    _base_style(ax, f"Average Generation Mix during High Curtailment \n (5% hours with the highest physical Curtailment) — {country.capitalize()}", 
+                "Source", "Average Generation [MWh]")
+    return _save_show(fig, f"mix_during_curtailment_{country}.png", country)
