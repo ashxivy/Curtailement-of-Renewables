@@ -76,13 +76,14 @@ def plot_export_saturation_curtailment(
     filename="export_saturation_logic.png",
 ):
     """Montre que le curtailment survient quand les exports saturent."""
+    target_var = "curtailment_physical_total" if "curtailment_physical_total" in df.columns else "curtailment_mwh"
     df_viz = df[df["generation_load_balance"] > 0].copy()
 
     fig, ax = plt.subplots(figsize=(12, 7))
     sns.scatterplot(
         data=df_viz,
         x="net_export_total",
-        y="curtailment_mwh",
+        y=target_var,
         hue="is_negative",
         palette={0: "gray", 1: "red"},
         alpha=0.5,
@@ -98,8 +99,7 @@ def plot_curtailment_heatmap(
     filename: str = "curtailment_seasonal_heatmap.png",
 ):
     """Heatmap Mois × Heure de la fréquence du curtailment physique."""
-    # On utilise la nouvelle variable d'écrêtement physique !
-    target_var = "curtailment_physical_total" if "curtailment_physical_total" in df.columns else "curtailment_mwh"
+    target_var = "curtailment_physical_total"
     
     pivot = df.pivot_table(
         index=df.index.month,
@@ -394,7 +394,7 @@ def plot_curtailment_conditions_scatter(
     filename: str = "curtailment_conditions_scatter.png",
 ):
     """Montre que le curtailment survient à faible charge résiduelle et prix bas/négatifs."""
-    target_var = "curtailment_physical_total" if "curtailment_physical_total" in df.columns else "curtailment_mwh"
+    target_var = "curtailment_physical_total"
     
     # On ne garde que les heures avec un écrêtement significatif
     df_viz = df[df[target_var] > 10].copy()
