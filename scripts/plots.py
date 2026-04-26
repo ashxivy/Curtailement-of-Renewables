@@ -50,14 +50,14 @@ def plot_curtailment_v_price_scatter(
     filename="curtailment_vs_price.png",
 ):
     """Corrélation inverse entre prix et volume de curtailment."""
-    df_viz = df[df["curtailment_physical_total"] > 0].copy()
+    df_viz = df[df["curtailment_physical_economic"] > 0].copy()
     if sample_frac < 1:
         df_viz = df_viz.sample(frac=sample_frac)
 
     fig, ax = plt.subplots(figsize=(10, 6))
     scatter = ax.scatter(
         df_viz["price"],
-        df_viz["curtailment_physical_total"],
+        df_viz["curtailment_physical_economic"],
         c=df_viz["vre_penetration_forecast"],
         cmap="viridis",
         alpha=0.6,
@@ -82,7 +82,7 @@ def plot_export_saturation_curtailment(
     sns.scatterplot(
         data=df_viz,
         x="net_export_total",
-        y="curtailment_mwh",
+        y="curtailment_physical_economic",
         hue="is_negative",
         palette={0: "gray", 1: "red"},
         alpha=0.5,
@@ -99,7 +99,7 @@ def plot_curtailment_heatmap(
 ):
     """Heatmap Mois × Heure de la fréquence du curtailment physique."""
     # On utilise la nouvelle variable d'écrêtement physique !
-    target_var = "curtailment_physical_total" if "curtailment_physical_total" in df.columns else "curtailment_mwh"
+    target_var = "curtailment_physical_economic" if "curtailment_physical_economic" in df.columns else "curtailment_mwh"
     
     pivot = df.pivot_table(
         index=df.index.month,
@@ -394,7 +394,7 @@ def plot_curtailment_conditions_scatter(
     filename: str = "curtailment_conditions_scatter.png",
 ):
     """Montre que le curtailment survient à faible charge résiduelle et prix bas/négatifs."""
-    target_var = "curtailment_physical_total" if "curtailment_physical_total" in df.columns else "curtailment_mwh"
+    target_var = "curtailment_physical_economic" if "curtailment_physical_economic" in df.columns else "curtailment_mwh"
     
     # On ne garde que les heures avec un écrêtement significatif
     df_viz = df[df[target_var] > 10].copy()
@@ -435,7 +435,7 @@ def plot_combined_curtailment_analysis(
     # Vérification des colonnes
     wind_col = "curtailment_physical_wind"
     solar_col = "curtailment_physical_solar"
-    target_var = "curtailment_physical_total"
+    target_var = "curtailment_physical_economic"
     
     if not all(c in df.columns for c in [wind_col, solar_col, target_var]):
         print("Erreur : Colonnes physiques manquantes.")
@@ -547,7 +547,7 @@ def plot_curtailment_comparison_with_price(
     d = df.loc[start_date:end_date].copy()
     
     col_market = "curtailment_mwh" if "curtailment_mwh" in d.columns else "curtailment_raw_gap"
-    col_physical = "curtailment_physical_total"
+    col_physical = "curtailment_physical_economic"
     
     fig, ax1 = plt.subplots(figsize=(15, 7))
     
@@ -595,8 +595,8 @@ def plot_mix_during_curtailment(df, country="france"):
     quand l'écrêtement est au maximum.
     """
     # On prend les 5% des heures où l'écrêtement physique est le plus fort
-    threshold = df["curtailment_physical_total"].quantile(0.95)
-    high_curt = df[df["curtailment_physical_total"] > threshold].copy()
+    threshold = df["curtailment_physical_economic"].quantile(0.95)
+    high_curt = df[df["curtailment_physical_economic"] > threshold].copy()
     
     # On agrège les catégories de production
     mix_cols = ["nuclear", "gas", "coal", "lignite", "hydro", "vre_real_total"]

@@ -356,139 +356,160 @@ import pandas as pd
 import numpy as np
 
 def add_features(df: pd.DataFrame, drop_missing_critical: bool = True) -> pd.DataFrame:
-    """Crée l'ensemble des features dérivées, dont l'estimation du curtailment (via marché et via météo)."""
+    """
+    Crée l'ensemble des features dérivées, dont l'estimation du curtailment 
+    (via prévisions de marché ET via approche physique/météo).
+    Version finale : Nettoyée, robuste et physiquement cohérente.
+    """
     out = df.copy()
 
-    # --- Temps ---
+    # ==========================================
+    # --- PARAMÈTRES GLOBAUX DU MODÈLE ---
+    # ==========================================
+    PRICE_THRESHOLD = 0        # Seuil économique pour valider l'écrêtement (0 €/MWh)
+    EFFICIENCY_FACTOR = 0.85   # Facteur de disponibilité/pertes du parc VRE (85%)
+
+    # ==========================================
+    # --- 1. Temps ---
+    # ==========================================
     out["hour"]       = out.index.hour
     out["weekday"]    = out.index.weekday
     out["is_weekend"] = (out["weekday"] >= 5).astype(int)
     out["hour_sin"]   = np.sin(2 * np.pi * out["hour"] / 24)
     out["hour_cos"]   = np.cos(2 * np.pi * out["hour"] / 24)
 
-    # --- Génération agrégée ---
+    # ==========================================
+    # --- 2. Agrégation & Must-Run ---
+    # ==========================================
     out["wind_total"]     = out.get("wind_on", 0) + out.get("wind_off", 0)
     out["vre_real_total"] = out["wind_total"] + out.get("solar", 0)
 
     # Hydro : Allemagne = "hydro" / France = "hydro_ror" + "hydro_res"
-    hydro_total = (
-        out.get("hydro", 0)
-        + out.get("hydro_ror", 0)
-        + out.get("hydro_res", 0)
-    )
+    hydro_total = out.get("hydro", 0) + out.get("hydro_ror", 0) + out.get("hydro_res", 0)
 
     out["renewable_total"] = (
-        out["vre_real_total"]
-        + hydro_total
-        + out.get("biomass", 0)
-        + out.get("other_res", 0)
-        + out.get("waste", 0)
+        out["vre_real_total"] + hydro_total +
+        out.get("biomass", 0) + out.get("other_res", 0) + out.get("waste", 0)
     )
 
     out["thermal_total"] = (
-        out.get("nuclear", 0)
-        + out.get("lignite", 0)
-        + out.get("coal", 0)
-        + out.get("gas", 0)
-        + out.get("oil", 0)
-        + out.get("other_conv", 0)
+        out.get("nuclear", 0) + out.get("lignite", 0) + out.get("coal", 0) +
+        out.get("gas", 0) + out.get("oil", 0) + out.get("other_conv", 0)
     )
 
-    # --- Demande & bilan ---
+    # Définition du Must-Run (pour le calcul de la charge résiduelle)
+    must_run = out.get("hydro_ror", 0) + out.get("biomass", 0)
+
+    # ==========================================
+    # --- 3. Demande & Bilan (Symétrique) ---
+    # ==========================================
     if "load" in out.columns:
-        out["residual_load"]           = out["load"] - out["vre_real_total"]
-        out["total_generation"]        = out["renewable_total"] + out["thermal_total"]
+        # Prise en compte de la demande globale du système (consommation + exports + pompage)
+        total_system_load = out["load"] + out.get("pumped_consumption", 0) + out.get("net_export_total", 0)
+        
+        # La charge que le parc pilotable (thermique/hydraulique) doit couvrir
+        out["residual_load"] = total_system_load - out["vre_real_total"] - must_run
+        
+        out["total_generation"] = out["renewable_total"] + out["thermal_total"]
         out["generation_load_balance"] = out["total_generation"] - out["load"]
 
-    # --- Prévisions ---
-    out["wind_forecast_total"] = (
-        out.get("wind_off_forecast", 0) + out.get("wind_on_forecast", 0)
-    )
+    # ==========================================
+    # --- 4. Prix et Concomitance ---
+    # ==========================================
+    if "price" in out.columns:
+        out["is_negative"] = (out["price"] < 0).astype(int)
+        if "price_de" in out.columns:
+            out["price_spread_de"] = out["price"] - out["price_de"]
+
+    # ==========================================
+    # --- 5. Prévisions ---
+    # ==========================================
+    out["wind_forecast_total"] = out.get("wind_off_forecast", 0) + out.get("wind_on_forecast", 0)
     if "vre_forecast_total" not in out.columns:
-        out["vre_forecast_total"] = (
-            out["wind_forecast_total"] + out.get("solar_forecast", 0)
-        )
+        out["vre_forecast_total"] = out["wind_forecast_total"] + out.get("solar_forecast", 0)
 
     if "load_forecast" in out.columns:
         out["residual_load_forecast"] = out["load_forecast"] - out["vre_forecast_total"]
         denom = out["load_forecast"].replace(0, np.nan)
         out["vre_penetration_forecast"] = out["vre_forecast_total"] / denom
 
-    # --- Curtailment (Basé sur les prévisions du marché) ---
-    out["curtailment_raw_gap"] = (
-        out["vre_forecast_total"] - out["vre_real_total"]
-    ).clip(lower=0)
-
-    # Capacity factors basés sur le réel
+    # ==========================================
+    # --- 6. Capacity Factors (Réels) ---
+    # ==========================================
     cap_wind = out.get("cap_wind_on", 0) + out.get("cap_wind_off", 0)
     out["wind_capacity_factor"]  = out["wind_total"] / cap_wind.replace(0, np.nan)
-    out["solar_capacity_factor"] = (
-        out.get("solar", 0) / out.get("cap_solar", pd.Series(np.nan, index=out.index)).replace(0, np.nan)
-    )
+    out["solar_capacity_factor"] = out.get("solar", 0) / out.get("cap_solar", pd.Series(np.nan, index=out.index)).replace(0, np.nan)
+
+    # =========================================================================
+    # --- MÉTHODE A : CURTAILMENT SUR PRÉVISIONS DE MARCHÉ (Anciens noms) ---
+    # =========================================================================
+    out["curtailment_raw_gap"] = (out["vre_forecast_total"] - out["vre_real_total"]).clip(lower=0)
 
     if "price" in out.columns:
-        out["is_negative"] = (out["price"] < 0).astype(int)
-
-        price_threshold = 10
         out["is_curtailment_likely"] = (
             (out["curtailment_raw_gap"] > 50) &
-            (out["price"] < price_threshold)
+            (out["price"] <= PRICE_THRESHOLD) 
         ).astype(int)
 
         out["curtailment_mwh"] = out["curtailment_raw_gap"] * out["is_curtailment_likely"]
 
-    # --- NOUVEAU : Curtailment (Basé sur la physique et la météo) ---
+    # =========================================================================
+    # --- MÉTHODE B : CURTAILMENT PHYSIQUE ET MÉTÉO (Nouvelle approche) ---
+    # =========================================================================
     if "windspeed_100m" in out.columns and "shortwave_radiation" in out.columns:
         
-        # 1. Calcul du Facteur de Charge (CF) Éolien théorique
+        # Éolien (Facteur de charge via courbe cubique)
         v = out["windspeed_100m"].fillna(0)
-        v_cut_in = 3.0
-        v_rated = 12.0
-        v_cut_out = 25.0
+        v_cut_in, v_rated, v_cut_out = 3.0, 12.0, 25.0
         
         out["wind_cf_weather"] = np.select(
-            [
-                v < v_cut_in,
-                (v >= v_cut_in) & (v < v_rated),
-                (v >= v_rated) & (v < v_cut_out),
-                v >= v_cut_out
-            ],
-            [
-                0.0,
-                (v**3 - v_cut_in**3) / (v_rated**3 - v_cut_in**3), # Courbe cubique
-                1.0,
-                0.0
-            ],
+            [v < v_cut_in, (v >= v_cut_in) & (v < v_rated), (v >= v_rated) & (v < v_cut_out), v >= v_cut_out],
+            [0.0, (v**3 - v_cut_in**3) / (v_rated**3 - v_cut_in**3), 1.0, 0.0],
             default=0.0
         )
         
-        # 2. Calcul du Facteur de Charge (CF) Solaire théorique (STC = 1000 W/m2)
+        # Solaire (STC = 1000 W/m2)
         g = out["shortwave_radiation"].fillna(0)
         out["solar_cf_weather"] = (g / 1000.0).clip(upper=1.0)
         
-        # Préparation sécurisée des capacités installées pour le calcul vectoriel
         cap_solar_s = out.get("cap_solar", pd.Series(0, index=out.index)).replace(np.nan, 0)
         cap_wind_s = cap_wind if isinstance(cap_wind, pd.Series) else pd.Series(cap_wind, index=out.index).replace(np.nan, 0)
         
-        # 3. Calcul de la Production Théorique Météo (MWh)
-        out["wind_theoretical_gen"] = out["wind_cf_weather"] * cap_wind_s
-        out["solar_theoretical_gen"] = out["solar_cf_weather"] * cap_solar_s
+        # Prod théorique (avec filtre d'efficacité)
+        out["wind_theoretical_gen"] = out["wind_cf_weather"] * cap_wind_s * EFFICIENCY_FACTOR
+        out["solar_theoretical_gen"] = out["solar_cf_weather"] * cap_solar_s * EFFICIENCY_FACTOR
         out["vre_theoretical_total"] = out["wind_theoretical_gen"] + out["solar_theoretical_gen"]
         
-        # 4. Calcul de l'écrêtement physique (Théorie - Réalité)
+        # Écrêtement Physique Total (L'écart brut Météo vs Réalité)
         out["curtailment_physical_wind"] = (out["wind_theoretical_gen"] - out["wind_total"]).clip(lower=0)
         out["curtailment_physical_solar"] = (out["solar_theoretical_gen"] - out.get("solar", 0)).clip(lower=0)
         out["curtailment_physical_total"] = out["curtailment_physical_wind"] + out["curtailment_physical_solar"]
         
-        # 5. Application du filtre économique sur l'écrêtement physique
+        # Écrêtement Physique ET Économique (Le vrai écrêtement validé par le prix)
         if "price" in out.columns:
             out["curtailment_physical_economic"] = np.where(
-                out["price"] < price_threshold, 
-                out["curtailment_physical_total"], 
+                out["price"] <= PRICE_THRESHOLD,
+                out["curtailment_physical_total"],
                 0
             )
 
+    # =========================================================================
+    # --- 7. Modèle Astier & Wolak (Symétrique et optimisé) ---
+    # =========================================================================
+    out['Nh'] = out.get('nuclear', 0) / 1000
+    
+    # Correction de redondance : on utilise la variable déjà calculée
+    out['RESh'] = out['vre_real_total'] / 1000
+    
+    # RDh inclut bien les exports et le pompage pour retrouver la symétrie
+    total_sys_load = out.get("load", 0) + out.get("pumped_consumption", 0) + out.get("net_export_total", 0)
+    out['RDh'] = (total_sys_load - must_run) / 1000
+
+    out['net_system_demand'] = out['RDh'] - out['RESh']
+
+    # ==========================================
     # --- Nettoyage ---
+    # ==========================================
     if drop_missing_critical:
         critical = [c for c in ["price", "load_forecast", "vre_real_total"] if c in out.columns]
         if critical:
