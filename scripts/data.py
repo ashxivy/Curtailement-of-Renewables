@@ -352,9 +352,6 @@ WEATHER_VARS = [
 
 
 # ─── Feature engineering ──────────────────────────────────────────────────────
-import pandas as pd
-import numpy as np
-
 def add_features(df: pd.DataFrame, drop_missing_critical: bool = True) -> pd.DataFrame:
     """
     Crée l'ensemble des features dérivées, dont l'estimation du curtailment 
@@ -494,38 +491,17 @@ def add_features(df: pd.DataFrame, drop_missing_critical: bool = True) -> pd.Dat
             )
 
     # =========================================================================
-    # --- 7. Modèle Astier & Wolak — Variables de régression ---
-    # Logique R exacte :
-    #   residual_demand = consumption - hydro - pumped_storage - IX_flows - biothermal
-    #   RES             = wind + solar
+    # --- 7. Modèle Astier & Wolak (Symétrique et optimisé) ---
     # =========================================================================
-
-    # Nh : production nucléaire en GW
     out['Nh'] = out.get('nuclear', 0) / 1000
-
-    # RESh : ENR variables (éolien + solaire) en GW
+    
+    # Correction de redondance : on utilise la variable déjà calculée
     out['RESh'] = out['vre_real_total'] / 1000
+    
+    # RDh inclut bien les exports et le pompage pour retrouver la symétrie
+    total_sys_load = out.get("load", 0) + out.get("pumped_consumption", 0) + out.get("net_export_total", 0)
+    out['RDh'] = (total_sys_load - must_run) / 1000
 
-    # Hydro total (run-of-river + réservoir + colonne agrégée si dispo)
-    hydro_all = (
-        out.get("hydro",      pd.Series(0, index=out.index)) +
-        out.get("hydro_ror",  pd.Series(0, index=out.index)) +
-        out.get("hydro_res",  pd.Series(0, index=out.index))
-    )
-
-    # RDh : charge résiduelle en GW
-    # = consommation - hydro (tout) - pompage - exports nets - biomasse
-    # Réplique exacte de : consumption_realized - hydro - pumped_storage
-    #                       - IX_flows_realized - biothermal
-    out['RDh'] = (
-        out.get("load",               pd.Series(0, index=out.index))
-        - hydro_all
-        - out.get("pumped_consumption", pd.Series(0, index=out.index))  # soustrait comme en R
-        - out.get("net_export_total",   pd.Series(0, index=out.index))  # exports = charge sur le système
-        - out.get("biomass",            pd.Series(0, index=out.index))
-    ) / 1000
-
-    # Variable des bins : RDh - RESh (en GW, seuils 25 / 40 / 63)
     out['net_system_demand'] = out['RDh'] - out['RESh']
 
     # ==========================================
